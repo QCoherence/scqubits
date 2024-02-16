@@ -176,6 +176,21 @@ fullzeropi_defaults = {
     "num_sample": 50,
 }
 
+coupledzeropi_defaults = {
+    **global_defaults,
+    "scan_param": "flux",
+    "operator": "n_theta_operator",
+    "ncut": ncut_range,
+    "EL": EL_range,
+    "ECJ": EC_range,
+    "dEJ": {"v_min": 0.0, "v_max": 1.0},
+    "dCJ": {"v_min": 0.0, "v_max": 1.0},
+    "dEL": {"v_min": 0.0, "v_max": 1.0},
+    "dC": {"v_min": 0.0, "v_max": 1.0},
+    "scale": None,
+    "num_sample": 50,
+}
+
 cos2phiqubit_defaults = {
     **global_defaults,
     "scan_param": "flux",
@@ -211,6 +226,7 @@ qubit_defaults = {
     "FluxQubit": fluxqubit_defaults,
     "ZeroPi": zeropi_defaults,
     "FullZeroPi": fullzeropi_defaults,
+    "CoupledZeroPi": coupledzeropi_defaults,
     "Cos2PhiQubit": cos2phiqubit_defaults,
     "Snailmon": snailmon_defaults,
     "Bifluxon": bifluxon_defaults,
@@ -335,6 +351,7 @@ supported_qubits = [
     "FluxQubit",
     "ZeroPi",
     "FullZeroPi",
+    "CoupledZeroPi",
     "Cos2PhiQubit",
     # "Snailmon",
     # "Bifluxon",
@@ -345,6 +362,7 @@ slow_qubits = [
     "FluxQubit",
     "ZeroPi",
     "FullZeroPi",
+    "CoupledZeroPi",
     "Cos2PhiQubit",
     # "Snailmon",
     # "Bifluxon",

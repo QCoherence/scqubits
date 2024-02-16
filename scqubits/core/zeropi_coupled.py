@@ -1,4 +1,4 @@
-# zeropi.py
+# zeropi_coupled.py
 #
 # This file is part of scqubits: a Python package for superconducting qubits,
 # Quantum 5, 583 (2021). https://quantum-journal.org/papers/q-2021-11-17-583/
@@ -11,15 +11,14 @@
 ############################################################################
 
 import warnings
-
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import ndarray
 from scipy import sparse
+from scipy.constants import value
 from scipy.sparse import csc_matrix, dia_matrix
 
 import scqubits.core.central_dispatch as dispatch
@@ -32,7 +31,6 @@ import scqubits.io_utils.fileio_serializers as serializers
 import scqubits.ui.qubit_widget as ui
 import scqubits.utils.plotting as plot
 import scqubits.utils.spectrum_utils as utils
-
 from scqubits.core.discretization import Grid1d
 from scqubits.core.noise import NoisySystem
 from scqubits.core.storage import WaveFunctionOnGrid
@@ -47,7 +45,7 @@ class NoisyZeroPi(NoisySystem):
 # -Symmetric 0-pi qubit, phi discretized, theta in charge basis
 
 
-class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
+class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
     r"""Zero-Pi Qubit
 
     | [1] Brooks et al., Physical Review A, 87(5), 052306 (2013). http://doi.org/10.1103/PhysRevA.87.052306
@@ -107,12 +105,13 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
     evals_method_options: 
         dictionary with evals diagonalization options 
    """
-
     EJ = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     EL = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     ECJ = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     EC = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     dEJ = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
+    dEL = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
+    dC = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     dCJ = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     ng = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     ncut = descriptors.WatchedProperty(int, "QUANTUMSYSTEM_UPDATE")
@@ -128,6 +127,8 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
         grid: Grid1d,
         ncut: int,
         dEJ: float = 0.0,
+        dEL: float = 0.0,
+        dC: float = 0.0,
         dCJ: float = 0.0,
         ECS: float = None,
         truncated_dim: int = 6,
@@ -159,6 +160,8 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
         elif ECS:
             self.EC = 1 / (1 / ECS - 1 / self.ECJ)
         self.dEJ = dEJ
+        self.dEL = dEL
+        self.dC = dC
         self.dCJ = dCJ
         self.ng = ng
         self.flux = flux
@@ -182,6 +185,8 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             "ECJ": 20.0,
             "EC": 0.04,
             "dEJ": 0.0,
+            "dEL": 0.0,
+            "dC": 0.0,
             "dCJ": 0.0,
             "ng": 0.1,
             "flux": 0.23,
@@ -190,7 +195,7 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
         }
 
     @classmethod
-    def create(cls) -> "ZeroPi":
+    def create(cls) -> "CoupledZeroPi":
         phi_grid = discretization.Grid1d(-19.0, 19.0, 200)
         init_params = cls.default_params()
         init_params["grid"] = phi_grid
@@ -205,8 +210,9 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             "tphi_1_over_f_cc",
             "tphi_1_over_f_flux",
             "tphi_1_over_f_ng",
+            "tphi_SN",
             "t1_flux_bias_line",
-            't1_capacitive',
+            "t1_capacitive",
             "t1_inductive",
         ]
 
@@ -853,3 +859,119 @@ class ZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             ylabel=r"$\theta$",
             **kwargs
         )
+
+    def g_phi_coupling_matrix(self, zeropi_states: ndarray) -> ndarray:
+        """Returns a matrix of coupling strengths g^\\phi_{ll'}
+        [cmp. Dempster et al., Eq. (18)], using the states from the list
+        `zeropi_states`. Most commonly, `zeropi_states` will contain eigenvectors of the
+        `DisorderedZeroPi` type.
+        """
+        prefactor = self.EL * (self.dEL / 2.0) * (8.0 * self.EC / self.EL) ** 0.25
+        return prefactor * utils.get_matrixelement_table(
+            self.phi_operator(), zeropi_states
+        )
+
+    def g_theta_coupling_matrix(self, zeropi_states: ndarray) -> ndarray:
+        """Returns a matrix of coupling strengths i*g^\\theta_{ll'}
+        [cmp. Dempster et al., Eq. (17)], using the states from the list
+        'zeropi_states'.
+        """
+        prefactor = 1j * self.ECS * (self.dC / 2.0) * (32.0 * self.EL / self.EC) ** 0.25
+        return prefactor * utils.get_matrixelement_table(
+            self.n_theta_operator(), zeropi_states
+        )
+
+    def g_coupling_matrix(
+        self, zeropi_states: ndarray = None, evals_count: int = None
+    ) -> ndarray:
+        """Returns a matrix of coupling strengths g_{ll'} [cmp. Dempster et al., text
+        above Eq. (17)], using the states from 'zeropi_states'. If
+        `zeropi_states==None`, then a set of `self.zeropi` eigenstates is calculated.
+        Only in that case is `which` used for the eigenstate number (and hence the
+        coupling matrix size).
+        """
+        if evals_count is None:
+            evals_count = self.hilbertdim()
+        if zeropi_states is None:
+            _, zeropi_states = self.eigensys(evals_count=evals_count)
+        return self.g_phi_coupling_matrix(zeropi_states) + self.g_theta_coupling_matrix(
+            zeropi_states
+        )
+
+    def chi_l(self, l: int, evals: ndarray, g_coupling_matrix: ndarray):
+        detuning = lambda l, l_prime: evals[l] - evals[l_prime] - np.sqrt(8 * self.EL * self.EC)
+        
+        return np.sum(
+            np.abs(g_coupling_matrix[l, :]) ** 2
+            * np.array(
+                [
+                    1 / detuning(l, l_prime) - 1 / detuning(l_prime, l)
+                    for l_prime in range(g_coupling_matrix.shape[1])
+                ]
+            )
+        )
+
+    def _tphi_SN(
+        self,
+        k_zeta: float,
+        T: float,
+        esys: Tuple[ndarray, ndarray] = None,
+        get_rate: bool = False,
+        **kwargs
+    ) -> float:
+        r"""
+        Calculate the shot noise dephasing time (or rate) due to the coupling to the Zeta mode.
+
+        Parameters
+        ----------
+        k_zeta:
+            intrinsic lifetime of the harmonic zeta-mode
+        T:
+            temperature in Kelvin
+        esys:
+            evals, evecs tuple
+        get_rate:
+            get rate or time
+        **kwargs:
+            gcut to change the number of evals used to compute g_coupling_matrix
+
+
+        Returns
+        -------
+        time or rate: float
+            decoherence time in units of :math:`2\pi ({\rm system\,\,units})`, or rate
+            in inverse units.
+        """
+
+        p = {"gcut": self.ncut}
+        p.update(kwargs)
+        evals, evecs = self.eigensys(evals_count=p["gcut"]) if esys is None else esys  # type: ignore
+        g_coupling_matrix = self.g_coupling_matrix(
+            zeropi_states=evecs, evals_count=len(evals)
+        )
+
+        chi_01 = (self.chi_l(1, evals, g_coupling_matrix) - self.chi_l(0, evals, g_coupling_matrix)) / 2
+        n_th = 1 / (
+            np.exp(
+                np.sqrt(8 * self.EL * self.EC) * 1e9
+                / (value("Boltzmann constant in Hz/K") * T)
+            )
+            - 1
+        )
+        rate = (
+            k_zeta
+            / 2
+            * np.real(
+                np.sqrt((1 + 2j * chi_01 / k_zeta) ** 2 + 8j * chi_01 * n_th / k_zeta)
+                - 1
+            )
+        )
+
+        # We assume that the system energies are given in units of frequency and
+        # not the angular frequency, hence we have to multiply by `2\pi`
+        rate *= 2 * np.pi
+
+        if get_rate:
+            return rate
+        else:
+            return 1 / rate if rate != 0 else np.inf

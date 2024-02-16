@@ -102,6 +102,7 @@ NOISE_PARAMS = {
     / sp.constants.e**2.0,  # Normal quantum resistance, aka Klitzing constant.
     # Note, in some papers a superconducting quantum
     # resistance is used, and defined as: h/(2e)^2
+    "k_zeta": 1e-5,  # 1/(100 µs) intrinsic decay rate of zeta mode (expressed in GHz)
 }
 
 
@@ -1136,6 +1137,51 @@ class NoisySystem(ABC):
             get_rate=get_rate,
             **kwargs
         )
+    
+    def tphi_SN(
+        self,
+        k_zeta: float = NOISE_PARAMS["k_zeta"],
+        T: float = NOISE_PARAMS["T"],
+        esys: Tuple[ndarray, ndarray] = None,
+        get_rate: bool = False,
+        **kwargs,
+    ) -> float:
+        r"""
+        Calculate the shot noise dephasing time (or rate) due to the coupling to the Zeta mode.
+
+        Parameters
+        ----------
+        k_zeta:
+            intrinsic lifetime of the harmonic zeta-mode
+        T:
+            temperature in Kelvin
+        esys:
+            evals, evecs tuple
+        get_rate:
+            get rate or time
+        **kwargs:
+            computing parameters
+
+
+        Returns
+        -------
+        time or rate: float
+            decoherence time in units of :math:`2\pi ({\rm system\,\,units})`, or rate
+            in inverse units.
+        """
+        if "tphi_SN" not in self.supported_noise_channels():
+            raise RuntimeError(
+                "Charge noise channel 'tphi_SN' is not supported in this"
+                " system."
+            )
+
+        return self._tphi_SN(
+            k_zeta=k_zeta,
+            T=T,
+            esys=None,
+            get_rate=get_rate,
+            **kwargs
+        )
 
     def t1(
         self,
@@ -1319,7 +1365,7 @@ class NoisySystem(ABC):
             )  # We assume that system energies are given in units of frequency
             return s
 
-        noise_op = noise_op or self.n_operator()  # type: ignore
+        noise_op = noise_op or (self.n_operator() if hasattr(self, "n_operator") else self.n_theta_operator())  # type: ignore
         if not isinstance(noise_op, (ndarray, csc_matrix, qt.Qobj)):
             raise AttributeError(
                 "The type of the matrix noise_op is invalid. It should be an instance of ndarray, csc_matrix or qutip Qobj."

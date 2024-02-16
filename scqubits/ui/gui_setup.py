@@ -275,7 +275,7 @@ def init_qubit_params_widgets_dict(
                 },
                 **kwargs,
             )
-    if isinstance(qubit, (scq.ZeroPi, scq.FullZeroPi)):  # scq.Bifluxon
+    if isinstance(qubit, (scq.ZeroPi, scq.FullZeroPi, scq.CoupledZeroPi)):  # scq.Bifluxon
         grid_min = qubit.grid.min_val
         grid_max = qubit.grid.max_val
         dict_v_qubit_params["grid"] = v.RangeSlider(

@@ -56,7 +56,7 @@ else:
     _HAS_IPYTHON = True
 
 
-QUBITS_WITH_GRID_INIT = (scq.ZeroPi, scq.FullZeroPi)  #  scq.Bifluxon
+QUBITS_WITH_GRID_INIT = (scq.ZeroPi, scq.FullZeroPi, scq.CoupledZeroPi)  #  scq.Bifluxon
 QUBITS_WITH_PHI_GRID = (
     scq.Transmon,
     scq.TunableTransmon,
@@ -64,7 +64,7 @@ QUBITS_WITH_PHI_GRID = (
     scq.FluxQubit,
     scq.Cos2PhiQubit,
 )
-QUBITS_WITH_THETA_GRID = (scq.ZeroPi, scq.Cos2PhiQubit)  # scq.Bifluxon,
+QUBITS_WITH_THETA_GRID = (scq.ZeroPi, scq.CoupledZeroPi, scq.Cos2PhiQubit)  # scq.Bifluxon,
 QUBITS_WITHOUT_WAVEFUNCTION_PLOT = (scq.FullZeroPi,)  # scq.Snailmon
 QUBITS_WITH_2D_WAVEFUNCTION_PLOT = (
     scq.FluxQubit,
