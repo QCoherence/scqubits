@@ -12,16 +12,14 @@
 
 import math
 import warnings
-
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy as sp
 import qutip as qt
-
+import scipy as sp
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.offsetbox import AnchoredText
@@ -32,10 +30,9 @@ from sympy import csc
 import scqubits.core.units as units
 import scqubits.settings as settings
 import scqubits.utils.plotting as plotting
-from scqubits.utils.misc import Qobj_to_scipy_csc_matrix
-
 from scqubits.core.storage import SpectrumData
 from scqubits.settings import matplotlib_settings
+from scqubits.utils.misc import Qobj_to_scipy_csc_matrix
 
 # flag that lets us show a warning about the default t1 behavior
 # (i.e., total=True setting) only once. Using the standard warnings
@@ -1144,7 +1141,6 @@ class NoisySystem(ABC):
         T: float = NOISE_PARAMS["T"],
         esys: Tuple[ndarray, ndarray] = None,
         get_rate: bool = False,
-        **kwargs,
     ) -> float:
         r"""
         Calculate the shot noise dephasing time (or rate) due to the coupling to the Zeta mode.
@@ -1159,8 +1155,6 @@ class NoisySystem(ABC):
             evals, evecs tuple
         get_rate:
             get rate or time
-        **kwargs:
-            computing parameters
 
 
         Returns
@@ -1178,9 +1172,8 @@ class NoisySystem(ABC):
         return self._tphi_SN(
             k_zeta=k_zeta,
             T=T,
-            esys=None,
-            get_rate=get_rate,
-            **kwargs
+            esys=esys,
+            get_rate=get_rate
         )
 
     def t1(
@@ -1779,6 +1772,58 @@ class NoisySystem(ABC):
             T=T,
             spectral_density=spectral_density,
             total=total,
+            esys=esys,
+            get_rate=get_rate,
+        )
+    
+    def t1_purcell(
+        self,
+        i: int = 1,
+        j: int = 0,
+        k_zeta: float = NOISE_PARAMS["k_zeta"],
+        T: float = NOISE_PARAMS["T"],
+        esys: Tuple[ndarray, ndarray] = None,
+        get_rate: bool = False,
+    ) -> float:
+        r"""
+        Depolarization of the qubit due to Purcell decay,
+        since the 0-`\pi` qubitʼs `\theta` and `\phi` degrees of freedom 
+        are coupled to the harmonic `\zeta`-mode which, itself,
+        is subject to intrinsic decay with rate :math:`\kappa_\zeta`.
+
+        Parameters
+        ----------
+        i: int >=0
+            state index that along with j defines a transition (i->j)
+        j: int >=0
+            state index that along with i defines a transition (i->j)
+        k_zeta:
+            intrinsic lifetime of the harmonic zeta-mode
+        T:
+            temperature in Kelvin
+        esys:
+            evals, evecs tuple
+        get_rate:
+            get rate or time
+
+
+        Returns
+        -------
+        time or rate: float
+            decoherence time in units of :math:`2\pi ({\rm system\,\,units})`, or rate
+            in inverse units.
+        """
+        if "t1_purcell" not in self.supported_noise_channels():
+            raise RuntimeError(
+                "Purcell depolarization via ζ-mode 't1_purcell' is not supported in this"
+                " system."
+            )
+
+        return self._t1_purcell(
+            i=i,
+            j=j,
+            k_zeta=k_zeta,
+            T=T,
             esys=esys,
             get_rate=get_rate,
         )

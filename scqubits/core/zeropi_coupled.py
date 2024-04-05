@@ -34,6 +34,7 @@ import scqubits.utils.spectrum_utils as utils
 from scqubits.core.discretization import Grid1d
 from scqubits.core.noise import NoisySystem
 from scqubits.core.storage import WaveFunctionOnGrid
+from scqubits.core.units import to_standard_units
 
 # - ZeroPi noise class
 
@@ -105,6 +106,7 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
     evals_method_options: 
         dictionary with evals diagonalization options 
    """
+
     EJ = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     EL = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
     ECJ = descriptors.WatchedProperty(float, "QUANTUMSYSTEM_UPDATE")
@@ -214,6 +216,7 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             "t1_flux_bias_line",
             "t1_capacitive",
             "t1_inductive",
+            "t1_purcell",
         ]
 
     def widget(self, params: Dict[str, Any] = None) -> None:
@@ -283,6 +286,10 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
     def hilbertdim(self) -> int:
         """Returns Hilbert space dimension"""
         return self.grid.pt_count * (2 * self.ncut + 1)
+
+    def omega_zeta(self) -> float:
+        """Returns `\zeta` mode angular frequency"""
+        return np.sqrt(8 * self.EL * self.EC)
 
     def potential(self, phi: ndarray, theta: ndarray) -> ndarray:
         """
@@ -748,7 +755,7 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
         self,
         theta_grid: Grid1d = None,
         contour_vals: Union[List[float], ndarray] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[Figure, Axes]:
         """Draw contour plot of the potential energy.
 
@@ -771,7 +778,7 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             contour_vals=contour_vals,
             xlabel=r"$\phi$",
             ylabel=r"$\theta$",
-            **kwargs
+            **kwargs,
         )
 
     def wavefunction(
@@ -826,7 +833,7 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
         theta_grid: Grid1d = None,
         mode: str = "abs",
         zero_calibrate: bool = True,
-        **kwargs
+        **kwargs,
     ) -> Tuple[Figure, Axes]:
         """Plots 2d phase-basis wave function.
 
@@ -857,7 +864,7 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             zero_calibrate=zero_calibrate,
             xlabel=r"$\phi$",
             ylabel=r"$\theta$",
-            **kwargs
+            **kwargs,
         )
 
     def g_phi_coupling_matrix(self, zeropi_states: ndarray) -> ndarray:
@@ -898,9 +905,16 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             zeropi_states
         )
 
+    def n_th(self, omega: float, T: float):
+        return 1 / (np.exp(to_standard_units(omega) / (2 * np.pi) / (value("Boltzmann constant in Hz/K") * T)) - 1)
+
     def chi_l(self, l: int, evals: ndarray, g_coupling_matrix: ndarray):
-        detuning = lambda l, l_prime: evals[l] - evals[l_prime] - np.sqrt(8 * self.EL * self.EC)
-        
+        detuning = (
+            lambda l, l_prime: evals[l]
+            - evals[l_prime]
+            - self.omega_zeta()
+        )
+
         return np.sum(
             np.abs(g_coupling_matrix[l, :]) ** 2
             * np.array(
@@ -917,7 +931,6 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
         T: float,
         esys: Tuple[ndarray, ndarray] = None,
         get_rate: bool = False,
-        **kwargs
     ) -> float:
         r"""
         Calculate the shot noise dephasing time (or rate) due to the coupling to the Zeta mode.
@@ -943,29 +956,96 @@ class CoupledZeroPi(base.QubitBaseClass, serializers.Serializable, NoisyZeroPi):
             in inverse units.
         """
 
-        p = {"gcut": self.ncut}
-        p.update(kwargs)
-        evals, evecs = self.eigensys(evals_count=p["gcut"]) if esys is None else esys  # type: ignore
+        evals, evecs = self.eigensys(evals_count=self.ncut) if esys is None else esys  # type: ignore
         g_coupling_matrix = self.g_coupling_matrix(
             zeropi_states=evecs, evals_count=len(evals)
         )
 
-        chi_01 = (self.chi_l(1, evals, g_coupling_matrix) - self.chi_l(0, evals, g_coupling_matrix)) / 2
-        n_th = 1 / (
-            np.exp(
-                np.sqrt(8 * self.EL * self.EC) * 1e9
-                / (value("Boltzmann constant in Hz/K") * T)
-            )
-            - 1
-        )
+        chi_01 = (
+            self.chi_l(1, evals, g_coupling_matrix)
+            - self.chi_l(0, evals, g_coupling_matrix)
+        ) / 2
         rate = (
             k_zeta
             / 2
             * np.real(
-                np.sqrt((1 + 2j * chi_01 / k_zeta) ** 2 + 8j * chi_01 * n_th / k_zeta)
+                np.sqrt(
+                    (1 + 2j * chi_01 / k_zeta) ** 2
+                    + 8j * chi_01 * self.n_th(self.omega_zeta(), T) / k_zeta
+                )
                 - 1
             )
         )
+
+        # We assume that the system energies are given in units of frequency and
+        # not the angular frequency, hence we have to multiply by `2\pi`
+        rate *= 2 * np.pi
+
+        if get_rate:
+            return rate
+        else:
+            return 1 / rate if rate != 0 else np.inf
+
+    def _t1_purcell(
+        self,
+        i: int,
+        j: int,
+        k_zeta: float,
+        T: float,
+        esys: Tuple[ndarray, ndarray] = None,
+        get_rate: bool = False
+    ) -> float:
+        r"""
+        Depolarization of the qubit due to Purcell decay,
+        since the 0-`\pi` qubitʼs `\theta` and `\phi` degrees of freedom
+        are coupled to the harmonic `\zeta`-mode which, itself,
+        is subject to intrinsic decay with rate :math:`\kappa_\zeta`.
+
+        Parameters
+        ----------
+        i: int >=0
+            state index that along with j defines a transition (i->j)
+        j: int >=0
+            state index that along with i defines a transition (i->j)
+        k_zeta:
+            intrinsic lifetime of the harmonic zeta-mode
+        T:
+            temperature in Kelvin
+        esys:
+            evals, evecs tuple
+        get_rate:
+            get rate or time
+
+
+        Returns
+        -------
+        time or rate: float
+            decoherence time in units of :math:`2\pi ({\rm system\,\,units})`, or rate
+            in inverse units.
+        """
+
+        evals, evecs = self.eigensys(evals_count=self.ncut) if esys is None else esys  # type: ignore
+        g_coupling_matrix = self.g_coupling_matrix(
+            zeropi_states=evecs, evals_count=len(evals)
+        )
+
+        e_i = evals[i]
+        e_j = evals[j]
+
+        if e_j > e_i:
+            rate = (
+                k_zeta
+                * self.n_th(e_j - e_i, T)
+                * np.abs(g_coupling_matrix[i, j]) ** 2
+                / np.abs(e_i - e_j + self.omega_zeta()) ** 2
+            )
+        else:
+            rate = (
+                k_zeta
+                * (1 + self.n_th(e_i - e_j, T))
+                * np.abs(g_coupling_matrix[i, j]) ** 2
+                / np.abs(e_i - e_j - self.omega_zeta()) ** 2
+            )
 
         # We assume that the system energies are given in units of frequency and
         # not the angular frequency, hence we have to multiply by `2\pi`
